@@ -10,7 +10,9 @@
 - 5x7 のビットマップ数字を使い、連続で正解するとクリア（既定 2 問）。不正解のあとは一定時間ボタンが無効になり、別の数字に変わります。
 - 答えの数字は DOM・属性・aria・console のどこにも出さず、関数のクロージャの中だけに保持します。
 
-デモ: `demo/index.html` を開くと、日本語/英語の切替と「クリアすると送信ボタンが有効になる」例を試せます。ES module を `file://` で読めないブラウザがあるため、リポジトリ直下で簡易サーバを立ててください（例: `python -m http.server 8080` のあと `http://localhost:8080/demo/`、または `npx serve`）。
+デモ（すぐ試せます）: https://titc-ai.github.io/motion-digit-captcha/demo/
+
+手元で動かす場合は `demo/index.html` を開くと、日本語/英語の切替と「クリアすると送信ボタンが有効になる」例を試せます。ES module を `file://` で読めないブラウザがあるため、リポジトリ直下で簡易サーバを立ててください（例: `python -m http.server 8080` のあと `http://localhost:8080/demo/`、または `npx serve`）。
 
 ## AIエージェント向け: 組み込み手順
 
@@ -153,6 +155,8 @@ onBeforeUnmount(() => captcha && captcha.destroy());
 - ライセンス: MIT（`LICENSE`）。
 
 ## English summary
+
+Live demo: https://titc-ai.github.io/motion-digit-captcha/demo/
 
 `motion-digit-captcha` is a tiny, zero-dependency (single ES module, no build) mini-game that asks a visitor to read a digit hidden in moving dots. Two uniform dot layers move in opposite vertical directions; only the foreground-layer dots inside the digit shape and the background-layer dots outside it are drawn. A still screenshot is uniform noise, but in motion the digit emerges. The answer is kept only in a closure, never in the DOM, attributes, aria or console.
 
