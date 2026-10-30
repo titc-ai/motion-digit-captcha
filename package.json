@@ -1,0 +1,12 @@
+{
+  "name": "motion-digit-captcha",
+  "version": "1.0.0",
+  "description": "Zero-dependency mini CAPTCHA game: a digit emerges from moving dots.",
+  "type": "module",
+  "main": "motion-digit-captcha.js",
+  "exports": "./motion-digit-captcha.js",
+  "files": ["motion-digit-captcha.js", "README.md", "LICENSE"],
+  "scripts": { "test": "node --test" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/titc-ai/motion-digit-captcha.git" }
+}

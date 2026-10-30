@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>motion-digit-captcha デモ</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #f6f6f8; color: #111; }
+  main { max-width: 420px; margin: 0 auto; }
+  form { background: #fff; padding: 16px; border-radius: 12px; border: 1px solid #ddd; }
+  label { display: block; margin: 0 0 12px; font-size: .9em; }
+  input, textarea { width: 100%; font: inherit; padding: 8px; box-sizing: border-box; }
+  #send { width: 100%; min-height: 44px; margin-top: 12px; font: inherit; font-weight: 700; }
+  .lang { margin-bottom: 12px; }
+  .lang button { min-height: 36px; }
+  #result { margin-top: 12px; font-size: .9em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>motion-digit-captcha</h1>
+  <div class="lang">
+    <button type="button" data-lang="ja">日本語</button>
+    <button type="button" data-lang="en">English</button>
+  </div>
+  <form id="form">
+    <label>Name <input name="name" autocomplete="name"></label>
+    <label>Message <textarea name="message" rows="3"></textarea></label>
+    <div id="captcha"></div>
+    <button id="send" type="submit" disabled>Send</button>
+    <p id="result" role="status"></p>
+  </form>
+</main>
+<script type="module">
+  import { mountMotionCaptcha } from '../motion-digit-captcha.js';
+
+  const send = document.getElementById('send');
+  const result = document.getElementById('result');
+  let captcha = null;
+
+  function mount(lang) {
+    if (captcha) captcha.destroy();
+    send.disabled = true;
+    result.textContent = '';
+    captcha = mountMotionCaptcha(document.getElementById('captcha'), {
+      lang,
+      onSuccess() { send.disabled = false; }
+    });
+  }
+
+  document.querySelectorAll('[data-lang]').forEach((b) => {
+    b.addEventListener('click', () => mount(b.dataset.lang));
+  });
+  document.getElementById('form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!captcha.isSolved()) return;
+    result.textContent = 'OK: (demo) form would be submitted here.';
+  });
+  mount('ja');
+</script>
+</body>
+</html>
