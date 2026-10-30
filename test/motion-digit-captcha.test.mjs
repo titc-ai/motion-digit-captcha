@@ -250,3 +250,143 @@ test("答えを出さない: ソースに console 出力が無い", () => {
   const src = readFileSync(path.join(__dirname, "..", "motion-digit-captcha.js"), "utf8");
   assert.ok(!/console\./.test(src));
 });
+
+// ---- 1.0.1 で直した不具合の回帰テスト ----
+
+test("resolveOptions: lang に Object.prototype のキー名を渡しても ja になる", () => {
+  for (const lang of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    const o = resolveOptions({ lang });
+    assert.equal(o.lang, "ja", lang);
+    assert.equal(o.labels.start, LABELS.ja.start, lang);
+  }
+});
+
+test("resolveOptions: jitter が大きすぎても数字がキャンバスに収まる", () => {
+  for (const size of [50, 130, 260]) {
+    const o = resolveOptions({ size, jitter: 1000 });
+    assert.ok(GLYPH_COLS * o.cell + 2 * o.jitter <= o.size, `cols size=${size}`);
+    assert.ok(GLYPH_ROWS * o.cell + 2 * o.jitter <= o.size, `rows size=${size}`);
+  }
+  assert.equal(resolveOptions({ jitter: 5 }).jitter, 5);
+});
+
+test("visibleDots: out を渡すと同じ配列を空にして使い回す", () => {
+  const F = { n: 2, w: 260, h: 260, xs: Float64Array.of(100, 5), ys: Float64Array.of(100, 5), dy: 0 };
+  const buf = [9, 9, 9];
+  const r1 = visibleDots(F, F, (x) => x > 50, buf);
+  assert.equal(r1, buf);
+  assert.deepEqual(buf, [100, 100, 5, 5]);
+  assert.deepEqual(visibleDots(F, F, (x) => x > 50, buf), [100, 100, 5, 5]);
+});
+
+// 最小限の偽DOM（mountMotionCaptcha の挙動確認用。ブラウザ実機の代わりではない）
+function makeFakeDom() {
+  const listeners = (o) => (o._l ??= {});
+  class Node_ {
+    constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.style = { setProperty() {} }; this._text = ""; this.disabled = false; this.className = ""; }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    appendChild(c) { this.children.push(c); c.parent = this; return c; }
+    append(...cs) { cs.forEach((c) => this.appendChild(c)); }
+    set textContent(v) { this._text = String(v); if (v === "") this.children = []; }
+    get textContent() { return this._text; }
+    addEventListener(t, f) { (listeners(this)[t] ??= []).push(f); }
+    removeEventListener(t, f) { const a = listeners(this)[t] || []; const i = a.indexOf(f); if (i >= 0) a.splice(i, 1); }
+    dispatchEvent(ev) { (listeners(this)[ev.type] || []).slice().forEach((f) => f(ev)); return true; }
+    click() { if (!this.disabled) this.dispatchEvent({ type: "click" }); }
+    focus() { this.ownerDocument.activeElement = this; }
+    getContext() { return { fillRect() {}, fillText() {}, set fillStyle(v) {}, set font(v) {}, set textAlign(v) {} }; }
+  }
+  const doc = new Node_("document");
+  doc.hidden = false;
+  doc.body = new Node_("body");
+  doc.head = new Node_("head");
+  doc.activeElement = doc.body;
+  doc.getElementById = (id) => doc.head.children.find((c) => c.attrs.id === id) || null;
+  doc.createElement = (tag) => { const n = new Node_(tag); n.ownerDocument = doc; n.id = ""; Object.defineProperty(n, "id", { set(v) { n.attrs.id = v; }, get() { return n.attrs.id; } }); return n; };
+  const container = doc.createElement("div");
+  const all = (n) => [n, ...n.children.flatMap(all)];
+  return { doc, container, find: (cls) => all(container).filter((n) => n.className === cls) };
+}
+
+function withFakeRaf(fn) {
+  const pending = new Map();
+  let nextId = 1;
+  const saved = [globalThis.requestAnimationFrame, globalThis.cancelAnimationFrame];
+  globalThis.requestAnimationFrame = (f) => { pending.set(nextId, f); return nextId++; };
+  globalThis.cancelAnimationFrame = (id) => { pending.delete(id); };
+  try { return fn(pending); } finally { [globalThis.requestAnimationFrame, globalThis.cancelAnimationFrame] = saved; }
+}
+
+test("mount: 連続正解で onSuccess が1回だけ・mdc:success も1回・クリア後の誤クリックは無視", () => {
+  withFakeRaf(() => {
+    const { container, find } = makeFakeDom();
+    let ok = 0, ev = 0;
+    container.addEventListener("mdc:success", () => ev++);
+    const c = mountMotionCaptcha(container, { rand: () => 0.35, onSuccess: () => ok++ });
+    const btns = find("mdc-btn");
+    find("mdc-start")[0].click();
+    btns[3].click(); // 1問目は常に 3（rand 固定）
+    assert.equal(c.isSolved(), false);
+    btns[4].click(); // 2問目は 4
+    assert.equal(c.isSolved(), true);
+    btns[4].click(); btns[3].click(); find("mdc-start")[0].click();
+    assert.equal(ok, 1);
+    assert.equal(ev, 1);
+    c.reset();
+    assert.equal(c.isSolved(), false);
+  });
+});
+
+test("mount: onSuccess が例外を投げても mdc:success は発火する", () => {
+  withFakeRaf(() => {
+    const { container, find } = makeFakeDom();
+    let ev = 0;
+    container.addEventListener("mdc:success", () => ev++);
+    mountMotionCaptcha(container, { rounds: 1, rand: () => 0.35, onSuccess() { throw new Error("x"); } });
+    find("mdc-start")[0].click();
+    assert.throws(() => find("mdc-btn")[3].click());
+    assert.equal(ev, 1);
+  });
+});
+
+test("mount: destroy は二重に呼べて、rAF が残らず、destroy 後の reset/start は何もしない", () => {
+  withFakeRaf((pending) => {
+    const { doc, container, find } = makeFakeDom();
+    const c = mountMotionCaptcha(container, { rand: () => 0.35 });
+    find("mdc-start")[0].click();
+    assert.equal(pending.size, 1);
+    c.destroy();
+    c.destroy();
+    assert.equal(pending.size, 0);
+    assert.equal(container.children.length, 0);
+    assert.equal((doc._l?.visibilitychange || []).length, 0);
+    c.reset();
+    assert.equal(c.isSolved(), false);
+  });
+});
+
+test("mount: 不正解でロック→lockMs後に解除され、ラベルの {constructor} は置換されない", async () => {
+  await withFakeRaf(async () => {
+    const { container, find } = makeFakeDom();
+    let fails = [];
+    mountMotionCaptcha(container, { rand: () => 0.35, lockMs: 5, labels: { wrong: "NG {constructor} {progress}" }, onFail: (e) => fails.push(e.streak) });
+    find("mdc-start")[0].click();
+    const btns = find("mdc-btn");
+    btns[9].click();
+    assert.deepEqual(fails, [0]);
+    assert.ok(btns.every((b) => b.disabled));
+    assert.equal(find("mdc-info")[0].textContent, "NG {constructor} 0 / 2 問正解");
+    await new Promise((r) => setTimeout(r, 30));
+    assert.ok(btns.every((b) => !b.disabled));
+  });
+});
+
+test("mount: 答えの数字を属性・テキストに出さない（数字ボタンの文字と文言のみ）", () => {
+  withFakeRaf(() => {
+    const { container, find } = makeFakeDom();
+    mountMotionCaptcha(container, { rand: () => 0.35 });
+    find("mdc-start")[0].click();
+    const dump = JSON.stringify(find("mdc-canvas").map((n) => n.attrs).concat(find("mdc-info").map((n) => n.textContent), find("mdc-digits").map((n) => n.attrs)));
+    assert.ok(!/\b3\b/.test(dump.replace(/"width":"260"|"height":"260"/g, "")));
+  });
+});

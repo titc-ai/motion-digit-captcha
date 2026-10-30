@@ -1,6 +1,6 @@
 {
   "name": "motion-digit-captcha",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Zero-dependency mini CAPTCHA game: a digit emerges from moving dots.",
   "type": "module",
   "main": "motion-digit-captcha.js",

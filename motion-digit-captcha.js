@@ -71,8 +71,10 @@ export const LABELS = Object.freeze({
   })
 });
 
+const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
 function format(text, vars) {
-  return String(text).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+  return String(text).replace(/\{(\w+)\}/g, (m, k) => (has(vars, k) ? String(vars[k]) : m));
 }
 
 // options を既定値と合わせて正規化する（純関数）。点の数 dots と実効の cell もここで決める。
@@ -80,12 +82,13 @@ export function resolveOptions(options = {}) {
   const o = options || {};
   const num = (v, d, min) => (Number.isFinite(v) && v >= min ? v : d);
   const size = Math.round(num(o.size, DEFAULTS.size, 50));
-  const jitter = num(o.jitter, DEFAULTS.jitter, 0);
+  // ずらしが大きすぎて数字がキャンバスの外に出ないよう、1マス1pxの数字が収まる範囲に抑える
+  const jitter = Math.min(num(o.jitter, DEFAULTS.jitter, 0), Math.floor((size - GLYPH_ROWS) / 2));
   // 数字（5x7マス）がずらしを含めてキャンバスに収まるよう、cell を上限で抑える
   const maxCell = Math.max(1, Math.floor((size - 2 * jitter) / GLYPH_ROWS));
   const cell = Math.min(num(o.cell, DEFAULTS.cell, 1), maxCell);
   const density = num(o.density, DEFAULTS.density, 0);
-  const lang = LABELS[o.lang] ? o.lang : DEFAULTS.lang;
+  const lang = has(LABELS, o.lang) ? o.lang : DEFAULTS.lang;
   return {
     rounds: Math.max(1, Math.round(num(o.rounds, DEFAULTS.rounds, 1))),
     lockMs: num(o.lockMs, DEFAULTS.lockMs, 0),
@@ -150,8 +153,9 @@ export function layerY(layer, i) {
 }
 
 // 描く点の一覧 [x0, y0, x1, y1, ...]。層Fは形の内側だけ、層Bは形の外側だけを残す。
-export function visibleDots(layerF, layerB, inside) {
-  const out = [];
+// out を渡すと、その配列を空にして使い回す（毎フレームの配列確保を避けたいとき用）。
+export function visibleDots(layerF, layerB, inside, out = []) {
+  out.length = 0;
   for (let i = 0; i < layerF.n; i++) {
     const x = layerF.xs[i];
     const y = layerY(layerF, i);
@@ -216,16 +220,16 @@ const CSS = [
   '.mdc-info{margin:8px 0 0;min-height:1.5em;font-size:.9em}'
 ].join('');
 
-function injectStyleOnce() {
-  if (document.getElementById(STYLE_ID)) return;
-  const el = document.createElement('style');
-  el.id = STYLE_ID;
-  el.textContent = CSS;
-  document.head.appendChild(el);
+function injectStyleOnce(doc) {
+  if (doc.getElementById(STYLE_ID)) return;
+  const style = doc.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = CSS;
+  doc.head.appendChild(style);
 }
 
-function el(tag, cls, attrs) {
-  const e = document.createElement(tag);
+function el(doc, tag, cls, attrs) {
+  const e = doc.createElement(tag);
   if (cls) e.className = cls;
   if (attrs) for (const k of Object.keys(attrs)) e.setAttribute(k, attrs[k]);
   return e;
@@ -240,27 +244,28 @@ export function mountMotionCaptcha(container, options = {}) {
   const S = cfg.size;
   const fmt = (t, extra) => format(t, { rounds: cfg.rounds, streak: state.streak, ...extra });
 
-  if (cfg.injectStyles) injectStyleOnce();
+  const doc = container.ownerDocument || document;
+  if (cfg.injectStyles) injectStyleOnce(doc);
   container.textContent = '';
-  const root = el('div', 'mdc');
+  const root = el(doc, 'div', 'mdc');
   root.style.setProperty('--mdc-size', S + 'px');
   root.style.setProperty('--mdc-bg', cfg.colors.background);
   root.style.setProperty('--mdc-dot', cfg.colors.dot);
-  const lead = el('p', 'mdc-lead');
-  const stage = el('div', 'mdc-stage');
-  const canvas = el('canvas', 'mdc-canvas', { width: S, height: S, role: 'img' });
+  const lead = el(doc, 'p', 'mdc-lead');
+  const stage = el(doc, 'div', 'mdc-stage');
+  const canvas = el(doc, 'canvas', 'mdc-canvas', { width: S, height: S, role: 'img' });
   stage.appendChild(canvas);
-  const group = el('div', 'mdc-digits', { role: 'group' });
+  const group = el(doc, 'div', 'mdc-digits', { role: 'group' });
   const digitBtns = [];
   for (let d = 0; d < 10; d++) {
-    const b = el('button', 'mdc-btn', { type: 'button' });
+    const b = el(doc, 'button', 'mdc-btn', { type: 'button' });
     b.textContent = String(d);
     b.disabled = true;
     group.appendChild(b);
     digitBtns.push(b);
   }
-  const startBtn = el('button', 'mdc-start', { type: 'button' });
-  const infoEl = el('p', 'mdc-info', { role: 'status', 'aria-live': 'polite' });
+  const startBtn = el(doc, 'button', 'mdc-start', { type: 'button' });
+  const infoEl = el(doc, 'p', 'mdc-info', { role: 'status', 'aria-live': 'polite' });
   root.append(lead, stage, group, startBtn, infoEl);
   container.appendChild(root);
   lead.textContent = format(L.lead, { rounds: cfg.rounds });
@@ -271,8 +276,8 @@ export function mountMotionCaptcha(container, options = {}) {
   let state = createState(); // 答え（state.digit）はここだけに持つ
   let layerF = null;
   let layerB = null;
-  let ox = 0;
-  let oy = 0;
+  let inside = () => false; // 現在のラウンドの数字の内側判定（ラウンドごとに作り直す）
+  const dotBuf = []; // 描く点の一時置き場（毎フレーム使い回す）
   let rafId = null;
   let lastT = 0;
   let lockTimer = null;
@@ -298,20 +303,19 @@ export function mountMotionCaptcha(container, options = {}) {
 
   // 新しい数字・置き場所・点の層にする
   function newRound() {
-    state = withDigit(state, nextDigit(state.digit, rand));
-    const w = GLYPH_COLS * cfg.cell;
-    const h = GLYPH_ROWS * cfg.cell;
+    const digit = nextDigit(state.digit, rand);
+    state = withDigit(state, digit);
     const jx = Math.round((rand() * 2 - 1) * cfg.jitter);
     const jy = Math.round((rand() * 2 - 1) * cfg.jitter);
-    ox = Math.round((S - w) / 2) + jx;
-    oy = Math.round((S - h) / 2) + jy;
+    const ox = Math.round((S - GLYPH_COLS * cfg.cell) / 2) + jx;
+    const oy = Math.round((S - GLYPH_ROWS * cfg.cell) / 2) + jy;
+    inside = (x, y) => glyphContains(digit, cfg.cell, ox, oy, x, y);
     layerF = createLayer(cfg.dots, S, S, rand);
     layerB = createLayer(cfg.dots, S, S, rand);
   }
 
   function draw() {
-    const digit = state.digit;
-    const dots = visibleDots(layerF, layerB, (x, y) => glyphContains(digit, cfg.cell, ox, oy, x, y));
+    const dots = visibleDots(layerF, layerB, inside, dotBuf);
     ctx.fillStyle = cfg.colors.background;
     ctx.fillRect(0, 0, S, S);
     ctx.fillStyle = cfg.colors.dot;
@@ -325,8 +329,8 @@ export function mountMotionCaptcha(container, options = {}) {
     // フレームレートに依存しないよう経過時間で動かす（長い中断のあとは飛びすぎないよう上限をつける）
     const dt = lastT ? Math.min(0.1, (now - lastT) / 1000) : 0;
     lastT = now;
-    layerF = advanceLayer(layerF, cfg.speed * dt);
-    layerB = advanceLayer(layerB, -cfg.speed * dt);
+    layerF.dy = wrap(layerF.dy + cfg.speed * dt, S);
+    layerB.dy = wrap(layerB.dy - cfg.speed * dt, S);
     draw();
   }
   function startLoop() {
@@ -342,10 +346,10 @@ export function mountMotionCaptcha(container, options = {}) {
     locked = false;
   }
   function onVisibilityChange() {
-    if (document.hidden) stopLoop();
+    if (doc.hidden) stopLoop();
     else if (state.status === 'playing') startLoop();
   }
-  document.addEventListener('visibilitychange', onVisibilityChange);
+  doc.addEventListener('visibilitychange', onVisibilityChange);
 
   function renderIdle() {
     stopLoop();
@@ -372,19 +376,26 @@ export function mountMotionCaptcha(container, options = {}) {
       startBtn.textContent = L.done;
       drawPlaceholder(L.placeholderClear);
       say(fmt(L.solved));
-      if (typeof onSuccess === 'function') onSuccess();
-      container.dispatchEvent(new CustomEvent('mdc:success', { bubbles: true }));
+      try {
+        if (typeof onSuccess === 'function') onSuccess();
+      } finally {
+        container.dispatchEvent(new CustomEvent('mdc:success', { bubbles: true }));
+      }
       return;
     }
     newRound();
     if (state.last === 'wrong') {
       say(fmt(L.wrong, { progress: progress() }));
       locked = true;
+      // ボタンを無効にするとフォーカスが失われるので、解除後に戻せるよう覚えておく
+      const focused = digitBtns.includes(doc.activeElement) ? doc.activeElement : null;
       setDigitButtons(false);
       lockTimer = setTimeout(() => {
         lockTimer = null;
         locked = false;
-        if (!destroyed && state.status === 'playing') setDigitButtons(true);
+        if (destroyed || state.status !== 'playing') return;
+        setDigitButtons(true);
+        if (focused && (!doc.activeElement || doc.activeElement === doc.body)) focused.focus();
       }, cfg.lockMs);
       if (typeof onFail === 'function') onFail({ streak: state.streak });
     } else {
@@ -395,9 +406,11 @@ export function mountMotionCaptcha(container, options = {}) {
   function start() {
     if (destroyed || state.status === 'playing' || state.status === 'cleared') return;
     clearLock();
+    const hadFocus = doc.activeElement === startBtn;
     state = startState(-1);
     newRound();
     setDigitButtons(true);
+    if (hadFocus) digitBtns[0].focus(); // 無効になるスタートボタンからフォーカスを移す
     startBtn.disabled = true;
     startBtn.textContent = L.playing;
     say(progress());
@@ -413,7 +426,7 @@ export function mountMotionCaptcha(container, options = {}) {
     destroyed = true;
     stopLoop();
     clearLock();
-    document.removeEventListener('visibilitychange', onVisibilityChange);
+    doc.removeEventListener('visibilitychange', onVisibilityChange);
     container.textContent = '';
   };
 

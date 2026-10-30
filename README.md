@@ -19,7 +19,7 @@
 次の 5 手順で組み込みます。順番どおりに実行してください。
 
 1. **ファイルを入手する**
-   - CDN から読む: `https://cdn.jsdelivr.net/gh/titc-ai/motion-digit-captcha@v1.0.0/motion-digit-captcha.js`
+   - CDN から読む: `https://cdn.jsdelivr.net/gh/titc-ai/motion-digit-captcha@v1.0.1/motion-digit-captcha.js`
    - または `motion-digit-captcha.js` をプロジェクトにコピーして相対パスで読む（npm 配布はしていません。ビルドも不要です）。
 2. **置き場所の `<div>` を用意する**: `<div id="captcha"></div>` をフォーム内の送信ボタンの直前に置く。
 3. **`mountMotionCaptcha` を呼ぶ**（ブラウザで DOM が使える時点で、1 回だけ）。
@@ -33,7 +33,7 @@
   <button id="send" type="submit" disabled>送信</button>
 </form>
 <script type="module">
-  import { mountMotionCaptcha } from 'https://cdn.jsdelivr.net/gh/titc-ai/motion-digit-captcha@v1.0.0/motion-digit-captcha.js';
+  import { mountMotionCaptcha } from 'https://cdn.jsdelivr.net/gh/titc-ai/motion-digit-captcha@v1.0.1/motion-digit-captcha.js';
   const send = document.getElementById('send');
   mountMotionCaptcha(document.getElementById('captcha'), {
     onSuccess() { send.disabled = false; }
@@ -55,7 +55,7 @@
 | `speed` | number | `45` | 点の速さ（px/秒、経過時間ベース） |
 | `density` | number | `2000/260²` | 1px² あたりの点の数（各層）。既定は 260x260 で 2000 点 |
 | `cell` | number | `28` | 数字の 1 マスの大きさ px（キャンバスに収まるよう自動で上限が掛かる） |
-| `jitter` | number | `12` | ラウンドごとの置き場所のずれ（±px） |
+| `jitter` | number | `12` | ラウンドごとの置き場所のずれ（±px）。数字が枠の外に出ないよう `size` に応じて自動で上限が掛かる |
 | `colors` | `{ background, dot }` | `{ background: '#05060a', dot: '#ffd840' }` | キャンバスの色 |
 | `lang` | `'ja' \| 'en'` | `'ja'` | 文言の言語 |
 | `labels` | object | なし | 文言の個別上書き。キーは `lead` `canvasLabel` `groupLabel` `start` `playing` `done` `placeholderIdle` `placeholderClear` `infoIdle` `progress` `correct` `wrong` `solved`。`{rounds}` `{streak}` `{progress}` が置換される |
@@ -75,12 +75,13 @@
 form.addEventListener('mdc:success', () => { send.disabled = false; });
 ```
 
-**CSS 変数**（`.mdc` 要素、または container に設定して上書き）:
+**CSS 変数**（container に設定するか、`.mdc` に対するCSSで上書き。ただし `--mdc-size` `--mdc-bg` `--mdc-dot` は mount 時に `.mdc` 要素へ直接設定されるため、色とサイズは `colors` と `size` オプションで指定してください。点とキャンバス背景は canvas に描くので CSS 変数では変わりません）:
 
 | 変数 | 既定値 | 用途 |
 |---|---|---|
-| `--mdc-bg` | `#05060a` | キャンバス背景（`colors.background` で設定される） |
-| `--mdc-dot` | `#ffd840` | 点の色（`colors.dot` で設定される） |
+| `--mdc-size` | `260px` | 最大幅（`size` で設定される） |
+| `--mdc-bg` | `#05060a` | 枠の背景（`colors.background` で設定される。点の描画色には影響しない） |
+| `--mdc-dot` | `#ffd840` | `colors.dot` の値を保持するだけで、スタイルには使われない |
 | `--mdc-radius` | `8px` | 角丸 |
 | `--mdc-font` | `inherit` | フォント |
 | `--mdc-text` | `inherit` | 文字色 |
@@ -164,7 +165,7 @@ Live demo: https://titc-ai.github.io/motion-digit-captcha/demo/
 <div id="captcha"></div>
 <button id="send" disabled>Send</button>
 <script type="module">
-  import { mountMotionCaptcha } from 'https://cdn.jsdelivr.net/gh/titc-ai/motion-digit-captcha@v1.0.0/motion-digit-captcha.js';
+  import { mountMotionCaptcha } from 'https://cdn.jsdelivr.net/gh/titc-ai/motion-digit-captcha@v1.0.1/motion-digit-captcha.js';
   const c = mountMotionCaptcha(document.getElementById('captcha'), {
     lang: 'en',
     onSuccess() { document.getElementById('send').disabled = false; }
